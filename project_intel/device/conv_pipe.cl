@@ -746,7 +746,7 @@ void maxPool(
 		lane_cnt = 0;
 
 		//#pragma ivdep array(pool_final)
-        #pragma ii 1
+        #pragma ii 1 //if it cause bug, remove this
 		for(ushort k=0; k<pool_y_bound; k++){
 			flag = pool_win_cnt & 0x01;
 			base_addr = pool_group_cnt*conv_xy + pool_stride*conv_x*pool_y_cnt + pool_stride*pool_win_cnt*POOL_GP_SIZE_X;
@@ -1011,9 +1011,9 @@ void eltwise(
 			uchar  conv_x,
 			uint  conv_xy,
 			uchar  stride,
-			float divisor,	  //1/pool_size^2
-			float in1_frac,
-			float in2_frac,//conver the input frac to output frac
+			//float divisor,	  //1/pool_size^2
+			uint in1_frac,
+			uint in2_frac,//conver the input frac to output frac
 			// float out_conver2char,
 			__global lane_data *restrict bottom_1,
 			__global lane_data *restrict bottom_2,
@@ -1021,10 +1021,11 @@ void eltwise(
 			)
 {
 	lane_data data_out;
-	float sum;
+	int sum;
+	unsigned int sum_int;
 	// float sum[VEC_SIZE];
-	float sumAvg[VEC_SIZE];
-	float out;
+	unsigned int sumAvg[VEC_SIZE];
+	unsigned int out;
 	//uchar pool_size_num;  //pool_size^2
 	//pool_size_num=pool_size*pool_size;
 	uchar conv_itm_x=0;
@@ -1033,8 +1034,8 @@ void eltwise(
 	uint xy_offset=0;
 	uint ptr=0;
 	uint outnum=0;//if have avgpool the out ptr
-	float avgPoolSum[VEC_SIZE];
-	float avgPoolBuf[VEC_SIZE][ELT_PIPE_DEPTH];
+	unsigned int avgPoolSum[VEC_SIZE];
+	unsigned int avgPoolBuf[VEC_SIZE][ELT_PIPE_DEPTH];
 	#pragma unroll
 	for(unsigned char vv=0; vv<VEC_SIZE; vv++){
 		avgPoolSum[vv]=0;
@@ -1048,19 +1049,22 @@ void eltwise(
 	{
 		#pragma unroll
 		for(unsigned char vv=0; vv<VEC_SIZE; vv++){
-			sum=bottom_1[j].data[vv]*in1_frac+bottom_2[j].data[vv]*in2_frac;
-			// relu
-			if(sum<0)
-				sum=0;
+			sum=bottom_1[j].data[vv]*in1_frac+bottom_2[j].data[vv]*in2_frac;	
+			if(sum&0x80000000)// relu //sum<0
+				sum_int=0;					
+			else
+				sum_int=sum;
 			if(pool_on!=3){
-				sum=sum+0.5;
+				sum_int=sum_int+MAGNIFI_VALUE_HALF;
 				// //overflow
-				if(sum>127)
-					sum=127;
-				data_out.data[vv]=convert_char_rtz(sum);//Round towards zero
+				if(sum_int&OVERFLOW_MASK)
+					sum_int=127;
+				else
+					sum_int=sum_int>>MAGNIFI_SHIFT;
+				data_out.data[vv]=convert_char_rtz(sum_int);//Round towards zero
 			}
 			else{
-				sumAvg[vv]=sum+avgPoolBuf[vv][ELT_PIPE_DEPTH-1];
+				sumAvg[vv]=sum_int+avgPoolBuf[vv][ELT_PIPE_DEPTH-1];
 				#pragma unroll
 				for(uchar p=ELT_PIPE_DEPTH-1; p>0; p-- ){
 					avgPoolBuf[vv][p] = avgPoolBuf[vv][p-1];
@@ -1101,10 +1105,20 @@ void eltwise(
 						avgPoolSum[vv] += avgPoolBuf[vv][i];
 						avgPoolBuf[vv][i]=0;
 					}
-					out=avgPoolSum[vv]*divisor+0.5;
+					out=MAGNIFI_VALUE_HALF;
+					out+=avgPoolSum[vv]>>6;
+					out+=avgPoolSum[vv]>>8;
+					out+=avgPoolSum[vv]>>11;
+					out+=avgPoolSum[vv]>>12;
+					out+=avgPoolSum[vv]>>13;
+					out+=avgPoolSum[vv]>>16;
+					//out=avgPoolSum/(7*7)host 
+					
 					//overflow,because of relu no <0 value here
-					if(out>127)
-						out=127;
+					if(out&OVERFLOW_MASK)
+						sum_int=127;
+					else
+						out=out>>MAGNIFI_SHIFT;
 					data_out.data[vv]=convert_char_rtz(out);//	Round towards zero
 					avgPoolSum[vv]=0;
 				}
@@ -1118,7 +1132,7 @@ void eltwise(
 }
 
 #endif
-
+#ifndef RESNET
 __kernel
 __attribute__((max_work_group_size(1,1,LRN_MAX_LOCAL_SIZE))) // (x,y,z)
 void lrn(
@@ -1254,3 +1268,4 @@ void lrn(
 	#endif
 
 }
+#endif

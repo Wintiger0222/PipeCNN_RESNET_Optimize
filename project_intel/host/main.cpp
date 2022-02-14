@@ -247,10 +247,11 @@ const char *knl_name_memRd = "memRead";
 const char *knl_name_conv  = "coreConv";
 const char *knl_name_Pool  = "maxPool";
 const char *knl_name_memWr = "memWrite";
-const char *knl_name_lrn   = "lrn";
 #ifdef RESNET
 const char *knl_name_bn   = "batchNorm";
 const char *knl_name_elt   = "eltwise";
+#else
+const char *knl_name_lrn   = "lrn";
 #endif
 
 
@@ -264,12 +265,16 @@ scoped_array<cl_kernel> knl_memRd;
 scoped_array<cl_kernel> knl_conv;
 scoped_array<cl_kernel> knl_memWr;
 scoped_array<cl_kernel> knl_pool;
+#ifndef RESNET
 scoped_array<cl_kernel> knl_lrn;
+#endif
 scoped_array<cl_command_queue> que_memRd;
 scoped_array<cl_command_queue> que_conv;
 scoped_array<cl_command_queue> que_memWr;
 scoped_array<cl_command_queue> que_pool;
+#ifndef RESNET
 scoped_array<cl_command_queue> que_lrn;
+#endif
 scoped_array<cl_mem> data_buf;
 scoped_array<cl_mem> output_buf;
 scoped_array<cl_mem> pool_buf;
@@ -353,10 +358,10 @@ int main(int argc, char** argv)
 	unsigned char batch_indx_dim2;
 
 	unsigned int weight_buf_size;
-
+#ifndef RESNET
 	size_t knl_lrn_global_size[3];
 	size_t knl_lrn_local_size[3];
-
+#endif
 	Timer t;  // Timer used for performance measurement
 	float time;
 
@@ -409,12 +414,16 @@ int main(int argc, char** argv)
 	que_conv.reset(num_devices);
 	que_memWr.reset(num_devices);
 	que_pool.reset(num_devices);
+#ifndef RESNET
 	que_lrn.reset(num_devices);
+#endif
 	knl_memRd.reset(num_devices);
 	knl_conv.reset(num_devices);
 	knl_memWr.reset(num_devices);
 	knl_pool.reset(num_devices);
+#ifndef RESNET
 	knl_lrn.reset(num_devices);
+#endif
 	// For each layer a group of buffers are created to store the weights and bias
 	weights_buf.reset(num_devices*LAYER_NUM);
 	bias_buf.reset(num_devices*LAYER_NUM);
@@ -453,9 +462,10 @@ int main(int argc, char** argv)
 		checkError(status, "Failed to create command queue 2");
 		que_pool[i] = clCreateCommandQueue(context, device[device_ptr], CL_QUEUE_PROFILING_ENABLE, &status);
 		checkError(status, "Failed to create command queue 3");
+#ifndef RESNET
 		que_lrn[i] = clCreateCommandQueue(context, device[device_ptr], CL_QUEUE_PROFILING_ENABLE, &status);
 		checkError(status, "Failed to create command queue 3");
-
+#endif
 
 		// Kernel
 		knl_memRd[i] = clCreateKernel(program, knl_name_memRd, &status);
@@ -469,9 +479,10 @@ int main(int argc, char** argv)
 
 		knl_memWr[i] = clCreateKernel(program, knl_name_memWr, &status);
 		checkError(status, "Failed to create memWr kernel");
-
+#ifndef RESNET
 		knl_lrn[i] = clCreateKernel(program, knl_name_lrn, &status);
 		checkError(status, "Failed to create lrn kernel");
+#endif
 #ifdef RESNET
 		que_bn[i] = clCreateCommandQueue(context, device[device_ptr], CL_QUEUE_PROFILING_ENABLE, &status);
 		checkError(status, "Failed to create command queue 4");
@@ -643,10 +654,11 @@ int main(int argc, char** argv)
 	scoped_array<cl_event> conv_event(num_devices);
 	scoped_array<cl_event> pool_event(num_devices);
 	scoped_array<cl_event> memWr_event(num_devices);
-	scoped_array<cl_event> lrn_event(num_devices);
 #ifdef RESNET
 	scoped_array<cl_event> bn_event(num_devices);
 	scoped_array<cl_event> elt_event(num_devices);
+#else
+	scoped_array<cl_event> lrn_event(num_devices);
 #endif
 
 	// Recorde the excution time of each operation for each layer
@@ -655,10 +667,11 @@ int main(int argc, char** argv)
 	cl_ulong conv_time[LAYER_NUM];
 	cl_ulong pool_time[LAYER_NUM];
 	cl_ulong memRd_time[LAYER_NUM];
-	cl_ulong lrn_time[LAYER_NUM];
 #ifdef RESNET
 	cl_ulong bn_time[LAYER_NUM];
 	cl_ulong elt_time[LAYER_NUM];
+#else
+	cl_ulong lrn_time[LAYER_NUM];
 #endif
 #endif
 
@@ -717,10 +730,11 @@ int main(int argc, char** argv)
 			conv_time[j]  =0;
 			pool_time[j]  =0;
 			memRd_time[j] =0;
-			lrn_time[j]   =0;
 #ifdef RESNET
 			bn_time[j]	  =0;
 			elt_time[j]	  =0;
+#else
+			lrn_time[j]   =0;
 #endif
 #endif
 
@@ -1141,7 +1155,7 @@ int main(int argc, char** argv)
 				status = clSetKernelArg(knl_memWr[i], argi++, sizeof(cl_mem), &eltwise_buf[i*input_config[batch_size]+k]);
 				checkError(status, "Failed to set argument %d of kernel memWr", argi - 1);
 			}
-#endif
+#else
 			//  Set knl_lrn arguments.
 			if(layer_config[j][lrn_on]){
 				argi = 0;
@@ -1162,6 +1176,7 @@ int main(int argc, char** argv)
 				checkError(status, "Failed to set argument %d of kernel lrn", argi - 1);
 
 			}
+#endif
 #ifdef RESNET
 			//Set knl_elt arguments
 			if(eltwise_config[j][eltwise_on])
@@ -1170,21 +1185,21 @@ int main(int argc, char** argv)
 				unsigned elt_input_num;
 				unsigned char elt_pool_on;
 				unsigned int conv_xy;
-				float divisor;	  //1/pool_size^2
-				float in1_frac;
-				float in2_frac;
+				//float divisor;	  //1/pool_size^2
+				unsigned int in1_frac;
+				unsigned int in2_frac;
 				// float out_conver2char;
 				elt_pool_on=layer_config[j][pool_on];
-				if(elt_pool_on==3){//avgPool
+				/*if(elt_pool_on==3){//avgPool
 					divisor=1.0/(layer_config[j][pool_size]*layer_config[j][pool_size]);
 				}
 				else{
 					divisor=0;
-				}
+				}*/
 				elt_input_num=layer_config[j][conv_x]*layer_config[j][conv_y]*layer_config[j][conv_z]/VEC_SIZE;
 				conv_xy=layer_config[j][conv_x]*layer_config[j][conv_y];
-				in1_frac=pow(2,addition_precision_config[j][elt_dout]-addition_precision_config[j][elt_din1]);
-				in2_frac=pow(2,addition_precision_config[j][elt_dout]-addition_precision_config[j][elt_din2]);
+				in1_frac=(unsigned int)pow(2,MAGNIFI_SHIFT+addition_precision_config[j][elt_dout]-addition_precision_config[j][elt_din1]);
+				in2_frac=(unsigned int)pow(2,MAGNIFI_SHIFT+addition_precision_config[j][elt_dout]-addition_precision_config[j][elt_din2]);
 				// out_conver2char=pow(2,addition_precision_config[j][elt_dout]);
 
 				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_uint), &elt_input_num);
@@ -1207,13 +1222,13 @@ int main(int argc, char** argv)
 				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_uchar), &layer_config[j][pool_stride]);
 				checkError(status, "Failed to set argument %d of kernel elt", argi - 1);
 
-				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_float), &divisor);
+				//status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_float), &divisor);
+				//checkError(status, "Failed to set argument %d of kernel elt", argi - 1);
+
+				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_uint), &in1_frac);
 				checkError(status, "Failed to set argument %d of kernel elt", argi - 1);
 
-				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_float), &in1_frac);
-				checkError(status, "Failed to set argument %d of kernel elt", argi - 1);
-
-				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_float), &in2_frac);
+				status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_uint), &in2_frac);
 				checkError(status, "Failed to set argument %d of kernel elt", argi - 1);
 
 				// status = clSetKernelArg(knl_elt[i], argi++, sizeof(cl_float), &out_conver2char);
@@ -1301,7 +1316,7 @@ int main(int argc, char** argv)
 			}
 
 
-
+#ifndef RESNET
 			// kernel lrn
 			if(layer_config[j][lrn_on]){
 
@@ -1318,6 +1333,7 @@ int main(int argc, char** argv)
 				status = clEnqueueNDRangeKernel(que_lrn[i], knl_lrn[i], 3, NULL, knl_lrn_global_size, knl_lrn_local_size, 1, &pool_event[i], &lrn_event[i]);
 				checkError(status, "Failed to launch kernel lrn");
 			}
+#endif
 #ifdef RESNET
 			if(eltwise_config[j][eltwise_on]){
 				//enqueue elt kernel
@@ -1331,8 +1347,12 @@ int main(int argc, char** argv)
 #endif
 			// Wait for all kernel to finish
 			if(layer_config[j][lrn_on]){
+#ifdef RESNET
 				status = clWaitForEvents(num_devices, lrn_event);
 				checkError(status, "Failed to finish lrn event");
+#else
+				printf("\nError: LRN layer is no longer supported !!!\n\n");	
+#endif
 			}
 			#ifdef RESNET
 				else if(eltwise_config[j][eltwise_on]){
@@ -1357,8 +1377,10 @@ int main(int argc, char** argv)
 			if(layer_config[j][pool_on]==1)
 				pool_time[j] += getKernelStartEndTime(pool_event[i]);
 			memWr_time[j] += getKernelStartEndTime(memWr_event[i]);
+#ifndef RESNET
 			if(layer_config[j][lrn_on])
 				lrn_time[j] += getKernelStartEndTime(lrn_event[i]);
+#endif
 #ifdef RESNET
 			if(j<CONV_NUM)
 				bn_time[j] += getKernelStartEndTime(bn_event[i]);
@@ -1379,10 +1401,12 @@ int main(int argc, char** argv)
 				status = clReleaseEvent(pool_event[i]);
 				checkError(status, "Failed to release pool event object");
 			}
+#ifndef RESNET
 			if(layer_config[j][lrn_on]){
 				status = clReleaseEvent(lrn_event[i]);
 				checkError(status, "Failed to release lrn event object");
 			}
+#endif
 #ifdef RESNET
 			if(j<CONV_NUM){
 				clReleaseEvent(bn_event[i]);
@@ -1552,10 +1576,12 @@ void readDataBack()
 		checkError(status, "Failed to set transfer output data");
 	}
 	else{
+#ifndef RESNET
 		printf("\nCopyed all batched results from data buffers.\n");
 		status = clEnqueueReadBuffer(que_lrn[0], data_buf[0], CL_FALSE,          // read from device0
 			0, sizeof(DTYPE) * read_buf_size, (void *)output, 0, NULL, &finish_event[0]);
 		checkError(status, "Failed to set transfer output data");
+#endif
 	}
 
 	// Wait for reads to finish
@@ -2460,9 +2486,11 @@ void cleanup()
 		if(knl_pool && knl_pool[i]) {
 			clReleaseKernel(knl_pool[i]);
 		}
+#ifndef RESNET
 		if(knl_lrn && knl_lrn[i]) {
 			clReleaseKernel(knl_lrn[i]);
 		}
+#endif
 		if(que_memRd && que_memRd[i]) {
 			clReleaseCommandQueue(que_memRd[i]);
 		}
@@ -2475,9 +2503,11 @@ void cleanup()
 		if(que_pool && que_pool[i]) {
 			clReleaseCommandQueue(que_pool[i]);
 		}
+#ifndef RESNET
 		if(que_lrn && que_lrn[i]) {
 			clReleaseCommandQueue(que_lrn[i]);
 		}
+#endif
 		if(data_buf && data_buf[i]) {
 			clReleaseMemObject(data_buf[i]);
 		}
